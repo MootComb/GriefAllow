@@ -199,15 +199,12 @@ public class Main extends JavaPlugin implements Listener {
                 int z = tntBlock.getZ();
                 String coords = x + ", " + y + ", " + z;
 
-                // УДАЛЯЕМ блок
                 tntBlock.setType(Material.AIR);
 
-                // ИСПРАВЛЕНИЕ: Спавним TNT точно в центре блока + небольшое смещение
                 org.bukkit.Location loc = tntBlock.getLocation().add(0.5, 0.5, 0.5);
                 TNTPrimed tnt = tntBlock.getWorld().spawn(loc, TNTPrimed.class);
                 tnt.setFuseTicks(80);
 
-                // ДОПОЛНИТЕЛЬНО: Устанавливаем velocity чтобы TNT не двигался
                 tnt.setVelocity(new org.bukkit.util.Vector(0, 0, 0));
 
                 debugLog("Fire arrow hit TNT at " + coords);
