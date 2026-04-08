@@ -92,13 +92,6 @@ public class Main extends JavaPlugin implements Listener {
         }
     }
 
-    // Log info messages if debug mode is enabled
-    private void infoLog(String message) {
-        if (debug) {
-            getLogger().info(message);
-        }
-    }
-
     // ==================== TNT EXPLOSION HANDLER ====================
     // Controls TNT explosions, block drops, and chain reactions
     @EventHandler(priority = EventPriority.LOWEST)
@@ -115,25 +108,25 @@ public class Main extends JavaPlugin implements Listener {
             for (Block block : event.blockList()) {
                 if (block.getType() == Material.TNT) {
                     if (tntChainReaction) {
-                        // Chain reaction ON: ignite nearby TNT
+                        org.bukkit.Location loc = block.getLocation();
                         block.setType(Material.AIR);
-                        TNTPrimed tnt = block.getWorld().spawn(block.getLocation(), TNTPrimed.class);
+                        TNTPrimed tnt = block.getWorld().spawn(loc, TNTPrimed.class);
                         tnt.setFuseTicks(80);
-                        debugLog("TNT chain reaction ignited at " +
+                        tnt.setYield(4.0F);
+                        tnt.setVelocity(new org.bukkit.util.Vector(0, 0, 0));
+                        debugLog("TNT forced vanilla ignition at " +
                                 block.getX() + ", " + block.getY() + ", " + block.getZ());
                     } else {
-                        // Chain reaction OFF: drop TNT as item
                         block.breakNaturally();
                         debugLog("TNT dropped as item at " +
                                 block.getX() + ", " + block.getY() + ", " + block.getZ());
                     }
                 } else {
-                    // Break other blocks naturally
                     block.breakNaturally();
                 }
             }
 
-            infoLog("TNT Explosion with " + (tntChainReaction ? "chain reaction!" : "items drop!"));
+            debugLog("TNT Explosion with " + (tntChainReaction ? "chain reaction!" : "items drop!"));
         } else {
             debugLog("TNT explosions disabled, skipping");
         }
@@ -151,9 +144,9 @@ public class Main extends JavaPlugin implements Listener {
                 debugLog("TNT ignition allowed");
 
                 if (event.getCause() == BlockIgniteEvent.IgniteCause.FLINT_AND_STEEL) {
-                    infoLog("TNT ignited with Flint & Steel!");
+                    debugLog("TNT ignited with Flint & Steel!");
                 } else if (event.getCause() == BlockIgniteEvent.IgniteCause.FIREBALL) {
-                    infoLog("TNT ignited with Fireball!");
+                    debugLog("TNT ignited with Fireball!");
                 }
             }
         } else {
@@ -173,7 +166,7 @@ public class Main extends JavaPlugin implements Listener {
                     if (event.getClickedBlock() != null && event.getClickedBlock().getType() == Material.TNT) {
                         event.setCancelled(false);
                         debugLog("Flint and steel used on TNT block");
-                        infoLog("Flint and steel on TNT!");
+                        debugLog("Flint and steel on TNT!");
                     }
                 }
             }
@@ -226,7 +219,7 @@ public class Main extends JavaPlugin implements Listener {
                 tnt.setVelocity(new org.bukkit.util.Vector(0, 0, 0));
 
                 debugLog("Fire arrow hit TNT at " + coords);
-                infoLog("TNT ignited by fire arrow at " + coords);
+                debugLog("TNT ignited by fire arrow at " + coords);
 
                 arrow.remove();
             }
@@ -275,7 +268,7 @@ public class Main extends JavaPlugin implements Listener {
                         event.getBlock().getX() + ", " +
                         event.getBlock().getY() + ", " +
                         event.getBlock().getZ());
-                infoLog("Wither Break!");
+                debugLog("Wither Break!");
             }
         } else {
             debugLog("Wither disabled, skipping");
@@ -324,23 +317,25 @@ public class Main extends JavaPlugin implements Listener {
         if (enableMinecart) {
             event.setCancelled(false);
             debugLog("Minecart hopper item movement allowed");
-            infoLog("Minecart hopper working!");
+            debugLog("Minecart hopper working!");
         } else {
             debugLog("Minecart hopper disabled, skipping");
         }
     }
 
     // ==================== EGG SPAWN HANDLER ====================
-    // Allows mobs to spawn from spawn eggs
+    // Allows mobs to spawn from spawn eggs when used on a block
     @EventHandler(priority = EventPriority.HIGHEST)
-    public void onEggSpawn(CreatureSpawnEvent event) {
-        debugLog("onEggSpawn called - Reason: " + event.getSpawnReason());
+    public void onEggSpawn(PlayerInteractEvent event) {
+        debugLog("onEggSpawn (PlayerInteractEvent) called - Action: " + event.getAction());
 
         if (enableEggSpawn) {
-            if (event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.SPAWNER_EGG) {
-                event.setCancelled(false);
-                debugLog("Mob spawn from egg allowed: " + event.getEntityType());
-                infoLog("Mob spawned from spawn egg!");
+            if (event.getAction().name().contains("RIGHT_CLICK_BLOCK")) {
+                if (event.getItem() != null && event.getItem().getType().name().endsWith("_SPAWN_EGG")) {
+                    event.setCancelled(false);
+                    debugLog("Spawn egg used on block: " + event.getItem().getType());
+                    debugLog("Mob spawned from spawn egg on block!");
+                }
             }
         } else {
             debugLog("Egg spawn disabled, skipping");
@@ -357,7 +352,7 @@ public class Main extends JavaPlugin implements Listener {
             event.setCancelled(false);
             debugLog("Vehicle destruction forced allowed");
             if (event.getAttacker() instanceof Player) {
-                infoLog("Player destroyed a vehicle!");
+                debugLog("Player destroyed a vehicle!");
             }
         } else {
             debugLog("Vehicle destruction disabled, using default behavior");
@@ -373,7 +368,7 @@ public class Main extends JavaPlugin implements Listener {
         if (enableFluidFlow) {
             event.setCancelled(false);
             debugLog("Fluid flow forced: " + event.getBlock().getType());
-            infoLog("Water/Lava flowing freely!");
+            debugLog("Water/Lava flowing freely!");
         } else {
             debugLog("Fluid flow disabled, using default behavior");
         }
@@ -390,7 +385,7 @@ public class Main extends JavaPlugin implements Listener {
                 if (event.getCaught() instanceof Minecart) {
                     event.setCancelled(false);
                     debugLog("Minecart caught by fishing rod - allowing pull");
-                    infoLog("Minecart pulled by fishing rod!");
+                    debugLog("Minecart pulled by fishing rod!");
                 }
             }
         } else {
