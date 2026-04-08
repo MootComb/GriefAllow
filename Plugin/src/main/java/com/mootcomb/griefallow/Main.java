@@ -4,23 +4,30 @@ import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Arrow;
+import org.bukkit.entity.Minecart;
 import org.bukkit.entity.TNTPrimed;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockIgniteEvent;
 import org.bukkit.event.block.BlockPistonExtendEvent;
 import org.bukkit.event.block.BlockPistonRetractEvent;
+import org.bukkit.event.block.BlockFromToEvent;
 import org.bukkit.event.entity.EntityChangeBlockEvent;
 import org.bukkit.event.entity.EntityDamageByBlockEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.entity.ProjectileHitEvent;
+import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.inventory.InventoryMoveItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerFishEvent;
+import org.bukkit.event.vehicle.VehicleDestroyEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public class Main extends JavaPlugin implements Listener {
 
+    // Configuration flags
     private boolean debug;
     private boolean enableTnt;
     private boolean tntChainReaction;
@@ -28,6 +35,10 @@ public class Main extends JavaPlugin implements Listener {
     private boolean enableWither;
     private boolean enableSand;
     private boolean enableMinecart;
+    private boolean enableEggSpawn;
+    private boolean enableVehicleDestroy;
+    private boolean enableFluidFlow;
+    private boolean enableFishingMinecart;
 
     @Override
     public void onEnable() {
@@ -44,7 +55,11 @@ public class Main extends JavaPlugin implements Listener {
                     ", enablePistons=" + enablePistons +
                     ", enableWither=" + enableWither +
                     ", enableSand=" + enableSand +
-                    ", enableMinecart=" + enableMinecart);
+                    ", enableMinecart=" + enableMinecart +
+                    ", enableEggSpawn=" + enableEggSpawn +
+                    ", enableVehicleDestroy=" + enableVehicleDestroy +
+                    ", enableFluidFlow=" + enableFluidFlow +
+                    ", enableFishingMinecart=" + enableFishingMinecart);
         } else {
             getLogger().info("GriefAllow enabled!");
         }
@@ -55,40 +70,37 @@ public class Main extends JavaPlugin implements Listener {
         getLogger().info("GriefAllow disabled!");
     }
 
+    // Load all configuration values from config.yml
     private void loadConfigValues() {
-        // Debug mode - default false if not present
         debug = getConfig().getBoolean("debug", false);
-
-        // TNT settings - default false if not present
         enableTnt = getConfig().getBoolean("enable-tnt", false);
         tntChainReaction = getConfig().getBoolean("tnt-chain-reaction", false);
-
-        // Piston settings - default false if not present
         enablePistons = getConfig().getBoolean("enable-pistons", false);
-
-        // Wither settings - default false if not present
         enableWither = getConfig().getBoolean("enable-wither", false);
-
-        // Sand/Gravel settings - default false if not present
         enableSand = getConfig().getBoolean("enable-sand", false);
-
-        // Minecart Hopper settings - default false if not present
         enableMinecart = getConfig().getBoolean("enable-minecart", false);
+        enableEggSpawn = getConfig().getBoolean("enable-egg-spawn", false);
+        enableVehicleDestroy = getConfig().getBoolean("enable-vehicle-destroy", false);
+        enableFluidFlow = getConfig().getBoolean("enable-fluid-flow", false);
+        enableFishingMinecart = getConfig().getBoolean("enable-fishing-minecart", false);
     }
 
+    // Log debug messages if debug mode is enabled
     private void debugLog(String message) {
         if (debug) {
             getLogger().info("[DEBUG] " + message);
         }
     }
 
+    // Log info messages if debug mode is enabled
     private void infoLog(String message) {
         if (debug) {
             getLogger().info(message);
         }
     }
 
-    // ==================== TNT Explosion ====================
+    // ==================== TNT EXPLOSION HANDLER ====================
+    // Controls TNT explosions, block drops, and chain reactions
     @EventHandler(priority = EventPriority.LOWEST)
     public void onExplode(EntityExplodeEvent event) {
         debugLog("onExplode called");
@@ -103,14 +115,14 @@ public class Main extends JavaPlugin implements Listener {
             for (Block block : event.blockList()) {
                 if (block.getType() == Material.TNT) {
                     if (tntChainReaction) {
-                        // Chain reaction ON: ignite TNT
+                        // Chain reaction ON: ignite nearby TNT
                         block.setType(Material.AIR);
                         TNTPrimed tnt = block.getWorld().spawn(block.getLocation(), TNTPrimed.class);
-                        tnt.setFuseTicks(80); // 4 seconds
+                        tnt.setFuseTicks(80);
                         debugLog("TNT chain reaction ignited at " +
                                 block.getX() + ", " + block.getY() + ", " + block.getZ());
                     } else {
-                        // Chain reaction OFF: drop as item
+                        // Chain reaction OFF: drop TNT as item
                         block.breakNaturally();
                         debugLog("TNT dropped as item at " +
                                 block.getX() + ", " + block.getY() + ", " + block.getZ());
@@ -127,7 +139,8 @@ public class Main extends JavaPlugin implements Listener {
         }
     }
 
-    // ==================== TNT Ignite ====================
+    // ==================== TNT IGNITE HANDLER ====================
+    // Allows TNT to be ignited by flint and steel, fireballs, etc.
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onTntIgnite(BlockIgniteEvent event) {
         debugLog("onTntIgnite called - Cause: " + event.getCause());
@@ -148,7 +161,8 @@ public class Main extends JavaPlugin implements Listener {
         }
     }
 
-    // ==================== Flint Interaction ====================
+    // ==================== FLINT AND STEEL HANDLER ====================
+    // Allows players to right-click TNT with flint and steel
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onFlintClick(PlayerInteractEvent event) {
         debugLog("onFlintClick called - Action: " + event.getAction());
@@ -168,7 +182,8 @@ public class Main extends JavaPlugin implements Listener {
         }
     }
 
-    // ==================== Fire Arrow ====================
+    // ==================== FIRE ARROW HANDLER ====================
+    // Allows flaming arrows to ignite TNT blocks
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onFireArrowHit(ProjectileHitEvent event) {
         debugLog("onFireArrowHit called");
@@ -199,12 +214,15 @@ public class Main extends JavaPlugin implements Listener {
                 int z = tntBlock.getZ();
                 String coords = x + ", " + y + ", " + z;
 
+                // Remove the TNT block
                 tntBlock.setType(Material.AIR);
 
+                // Spawn primed TNT at the location
                 org.bukkit.Location loc = tntBlock.getLocation().add(0.5, 0.5, 0.5);
                 TNTPrimed tnt = tntBlock.getWorld().spawn(loc, TNTPrimed.class);
                 tnt.setFuseTicks(80);
 
+                // Set zero velocity so it doesn't fly away
                 tnt.setVelocity(new org.bukkit.util.Vector(0, 0, 0));
 
                 debugLog("Fire arrow hit TNT at " + coords);
@@ -215,7 +233,8 @@ public class Main extends JavaPlugin implements Listener {
         }
     }
 
-    // ==================== Pistons ====================
+    // ==================== PISTON EXTEND HANDLER ====================
+    // Controls whether pistons can extend and push blocks
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPistonExtend(BlockPistonExtendEvent event) {
         debugLog("onPistonExtend called");
@@ -224,11 +243,12 @@ public class Main extends JavaPlugin implements Listener {
             event.setCancelled(false);
             debugLog("Piston extension allowed");
         } else {
-            debugLog("Pistons disabled, cancelling");
-            event.setCancelled(true);
+            debugLog("Pistons disabled, skipping");
         }
     }
 
+    // ==================== PISTON RETRACT HANDLER ====================
+    // Controls whether pistons can retract and pull blocks
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPistonRetract(BlockPistonRetractEvent event) {
         debugLog("onPistonRetract called");
@@ -237,12 +257,12 @@ public class Main extends JavaPlugin implements Listener {
             event.setCancelled(false);
             debugLog("Piston retraction allowed");
         } else {
-            debugLog("Pistons disabled, cancelling");
-            event.setCancelled(true);
+            debugLog("Pistons disabled, skipping");
         }
     }
 
-    // ==================== Wither Break ====================
+    // ==================== WITHER BLOCK BREAK HANDLER ====================
+    // Allows Wither to break blocks
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onWitherBlockBreak(EntityChangeBlockEvent event) {
         debugLog("onWitherBlockBreak called - Entity: " + event.getEntityType());
@@ -262,7 +282,8 @@ public class Main extends JavaPlugin implements Listener {
         }
     }
 
-    // ==================== Wither Damage ====================
+    // ==================== WITHER DAMAGE HANDLER ====================
+    // Allows Wither to deal damage to entities
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onWitherDamage(EntityDamageByBlockEvent event) {
         debugLog("onWitherDamage called");
@@ -271,12 +292,12 @@ public class Main extends JavaPlugin implements Listener {
             event.setCancelled(false);
             debugLog("Wither damage allowed");
         } else {
-            debugLog("Wither damage disabled");
-            event.setCancelled(true);
+            debugLog("Wither damage disabled, skipping");
         }
     }
 
-    // ==================== Sand/Gravel Fall ====================
+    // ==================== GRAVITY BLOCK HANDLER ====================
+    // Allows sand, gravel, and anvils to fall
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onGravityFall(EntityChangeBlockEvent event) {
         debugLog("onGravityFall called - Block type: " + event.getBlock().getType());
@@ -287,16 +308,15 @@ public class Main extends JavaPlugin implements Listener {
                 event.setCancelled(false);
                 debugLog("Gravity block falling allowed: " + type);
             } else {
-                // Для других блоков - разрешаем
                 event.setCancelled(false);
             }
         } else {
-            debugLog("Gravity blocks falling disabled");
-            event.setCancelled(true);
+            debugLog("Gravity blocks falling disabled, skipping");
         }
     }
 
-    // ==================== Minecart Hopper ====================
+    // ==================== MINECART HOPPER HANDLER ====================
+    // Allows minecart hoppers to transfer items between inventories
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onInventoryMove(InventoryMoveItemEvent event) {
         debugLog("onInventoryMove called");
@@ -306,8 +326,75 @@ public class Main extends JavaPlugin implements Listener {
             debugLog("Minecart hopper item movement allowed");
             infoLog("Minecart hopper working!");
         } else {
-            debugLog("Minecart hopper disabled");
-            event.setCancelled(true);
+            debugLog("Minecart hopper disabled, skipping");
+        }
+    }
+
+    // ==================== EGG SPAWN HANDLER ====================
+    // Allows mobs to spawn from spawn eggs
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onEggSpawn(CreatureSpawnEvent event) {
+        debugLog("onEggSpawn called - Reason: " + event.getSpawnReason());
+
+        if (enableEggSpawn) {
+            if (event.getSpawnReason() == CreatureSpawnEvent.SpawnReason.SPAWNER_EGG) {
+                event.setCancelled(false);
+                debugLog("Mob spawn from egg allowed: " + event.getEntityType());
+                infoLog("Mob spawned from spawn egg!");
+            }
+        } else {
+            debugLog("Egg spawn disabled, skipping");
+        }
+    }
+
+    // ==================== VEHICLE DESTROY HANDLER ====================
+    // Forces players to be able to destroy minecarts and boats when enabled
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onVehicleDestroy(VehicleDestroyEvent event) {
+        debugLog("onVehicleDestroy called - Vehicle: " + event.getVehicle().getType());
+
+        if (enableVehicleDestroy) {
+            event.setCancelled(false);
+            debugLog("Vehicle destruction forced allowed");
+            if (event.getAttacker() instanceof Player) {
+                infoLog("Player destroyed a vehicle!");
+            }
+        } else {
+            debugLog("Vehicle destruction disabled, using default behavior");
+        }
+    }
+
+    // ==================== FLUID FLOW HANDLER ====================
+    // Forces water and lava to flow and destroy blocks when enabled
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onFluidFlow(BlockFromToEvent event) {
+        debugLog("onFluidFlow called - Block: " + event.getBlock().getType());
+
+        if (enableFluidFlow) {
+            event.setCancelled(false);
+            debugLog("Fluid flow forced: " + event.getBlock().getType());
+            infoLog("Water/Lava flowing freely!");
+        } else {
+            debugLog("Fluid flow disabled, using default behavior");
+        }
+    }
+
+    // ==================== FISHING ROD MINECART HANDLER ====================
+    // Allows players to pull minecarts with a fishing rod when enabled
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onFishMinecart(PlayerFishEvent event) {
+        debugLog("onFishMinecart called - State: " + event.getState());
+
+        if (enableFishingMinecart) {
+            if (event.getState() == PlayerFishEvent.State.CAUGHT_ENTITY) {
+                if (event.getCaught() instanceof Minecart) {
+                    event.setCancelled(false);
+                    debugLog("Minecart caught by fishing rod - allowing pull");
+                    infoLog("Minecart pulled by fishing rod!");
+                }
+            }
+        } else {
+            debugLog("Minecart fishing disabled, using default behavior");
         }
     }
 }
