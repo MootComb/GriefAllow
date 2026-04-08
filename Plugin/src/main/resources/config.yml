@@ -1,23 +1,35 @@
-# GriefAllow Configuration
+# GriefAllow Configuration File
 
-# Debug mode: if true, prints detailed logs for every event handler
+# Set to true to enable debug messages in console
 debug: false
 
-# TNT Settings
+# Allow TNT to explode and destroy blocks
 enable-tnt: true
 
-# If true: nearby TNT blocks ignite in chain reaction
-# If false: nearby TNT blocks drop as items (don't explode)
+# When enabled, TNT explosions will ignite nearby TNT blocks
+# When disabled, TNT blocks drop as items instead of exploding again
 tnt-chain-reaction: false
 
-# Piston Settings
+# Allow pistons to extend, retract, push and pull blocks
 enable-pistons: true
 
-# Wither Settings
+# Allow Wither boss to break blocks and deal damage
 enable-wither: true
 
-# Sand/Gravel/Anvil gravity settings
+# Allow sand, gravel, and anvils to fall due to gravity
 enable-sand: true
 
-# Minecart Hopper settings
+# Allow minecart hoppers to transfer items between inventories
 enable-minecart: true
+
+# Allow mobs to spawn when using spawn eggs
+enable-egg-spawn: true
+
+# Allow players to destroy minecarts and boats
+enable-vehicle-destroy: true
+
+# Allow water and lava to flow and destroy blocks in their path
+enable-fluid-flow: true
+
+# Allow players to pull minecarts using a fishing rod
+enable-fishing-minecart: true
