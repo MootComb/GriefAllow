@@ -1,0 +1,23 @@
+# GriefAllow Configuration
+
+# Debug mode: if true, prints detailed logs for every event handler
+debug: false
+
+# TNT Settings
+enable-tnt: true
+
+# If true: nearby TNT blocks ignite in chain reaction
+# If false: nearby TNT blocks drop as items (don't explode)
+tnt-chain-reaction: false
+
+# Piston Settings
+enable-pistons: true
+
+# Wither Settings
+enable-wither: true
+
+# Sand/Gravel/Anvil gravity settings
+enable-sand: true
+
+# Minecart Hopper settings
+enable-minecart: true
