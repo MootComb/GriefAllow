@@ -6,7 +6,7 @@
 
     <groupId>com.mootcomb</groupId>
     <artifactId>GriefAllow</artifactId>
-    <version>2.2</version>
+    <version>3.0</version>
 
     <properties>
         <maven.compiler.source>8</maven.compiler.source>
