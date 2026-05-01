@@ -1,35 +1,89 @@
-# GriefAllow Configuration File
+# GriefAllow Configuration
+# Plugin that allows griefing mechanics in specified worlds and regions
 
-# Set to true to enable debug messages in console
+# Debug mode - enables detailed logging for troubleshooting
 debug: false
 
+# ==================== GRIEFING MECHANICS ====================
+
+# TNT Settings
 # Allow TNT to explode and destroy blocks
 enable-tnt: true
-
-# When enabled, TNT explosions will ignite nearby TNT blocks
-# When disabled, TNT blocks drop as items instead of exploding again
+# Enable chain reaction - TNT explosions will ignite nearby TNT blocks
 tnt-chain-reaction: false
 
-# Allow pistons to extend, retract, push and pull blocks
+# Piston Settings
+# Allow pistons to push and pull blocks
 enable-pistons: true
 
+# Wither Settings
 # Allow Wither boss to break blocks and deal damage
 enable-wither: true
 
-# Allow sand, gravel, and anvils to fall due to gravity
+# Falling Block Settings
+# Allow sand, gravel, and anvils to fall
 enable-sand: true
 
+# Minecart Hopper Settings
 # Allow minecart hoppers to transfer items between inventories
 enable-minecart: true
 
-# Allow mobs to spawn when using spawn eggs
+# Spawn Egg Settings
+# Allow mob spawn eggs to be used on blocks
 enable-egg-spawn: true
 
+# Vehicle Settings
 # Allow players to destroy minecarts and boats
 enable-vehicle-destroy: true
 
-# Allow water and lava to flow and destroy blocks in their path
+# Fluid Settings
+# Allow water and lava to flow freely and destroy blocks
 enable-fluid-flow: true
 
-# Allow players to pull minecarts using a fishing rod
+# Fishing Rod Settings
+# Allow players to pull minecarts with a fishing rod
 enable-fishing-minecart: true
+
+# ==================== WORLD FILTERING ====================
+
+# World filtering type:
+# whitelist - plugin will ONLY work in the worlds listed below
+# blacklist - plugin will NOT work in the worlds listed below
+# disable - plugin will work in ALL worlds regardless (default)
+worlds-type: disable
+
+# List of worlds for whitelist/blacklist filtering
+worlds:
+  - spawn
+  - lobby
+
+# ==================== REGION PROTECTION ====================
+
+# Region filtering type:
+# whitelist - plugin will ONLY work inside the regions defined below
+# blacklist - plugin will NOT work inside the regions defined below
+# disable - plugin will work regardless of regions (default)
+regions-type: disable
+
+# Protected regions defined as cuboid areas
+# Each region requires:
+#   world: World name where the region is located
+#   x1, y1, z1: First corner coordinates
+#   x2, y2, z2: Second corner coordinates
+regions:
+  region1:
+    world: world
+    x1: 100
+    y1: 0
+    z1: 100
+    x2: 200
+    y2: 256
+    z2: 200
+  region2:
+    world: world_nether
+    x1: -50
+    y1: 0
+    z1: -50
+    x2: 50
+    y2: 128
+    z2: 50
