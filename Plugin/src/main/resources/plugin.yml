@@ -1,6 +1,5 @@
 name: GriefAllow
-version: 2.2
-description: Allows grief mechanics
-authors: [MootComb]
+version: 3.0
 main: com.mootcomb.griefallow.Main
-api-version: "1.13"
+api-version: 1.13
+folia-supported: true
