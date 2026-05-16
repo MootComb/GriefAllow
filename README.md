@@ -7,7 +7,7 @@ A powerful Minecraft plugin that selectively enables griefing mechanics in speci
 > Download only from these official sources. Other sites are not affiliated with this project, but I recommend using official resources
 
 - **Modrinth:** [https://modrinth.com/plugin/griefallow](https://modrinth.com/plugin/griefallow)
-- **SpigotMC:** [https://www.spigotmc.org/resources/griefallow.113022/](https://www.spigotmc.org/resources/griefallow.113022/)
+- **SpigotMC:** [https://www.spigotmc.org/resources/griefallow.113022](https://www.spigotmc.org/resources/griefallow.113022)
 
 ## Overview
 This plugin is designed for servers that allow griefing. Its primary purpose is to enable and control griefing within designated territories.
