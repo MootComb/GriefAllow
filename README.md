@@ -15,3 +15,5 @@ This plugin is designed for servers that allow griefing. Its primary purpose is 
 ### Key Features
 - Full plugin configuration.
 - Selective griefing by world or region.
+- Compatible with WorldGuard, RedProtect, and other region plugins
+- Folia support
