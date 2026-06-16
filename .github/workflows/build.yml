@@ -1,0 +1,73 @@
+name: Build
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'src/**'
+      - 'pom.xml'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up JDK 8
+      uses: actions/setup-java@v4
+      with:
+        java-version: '8'
+        distribution: 'temurin'
+    
+    - name: Cache Maven dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.m2/repository
+        key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+        restore-keys: |
+          ${{ runner.os }}-maven-
+    
+    - name: Build with Maven
+      run: mvn clean compile package
+    
+    - name: Get artifact name from pom.xml
+      id: get_artifact
+      run: |
+        ARTIFACT_ID=$(mvn help:evaluate -Dexpression=project.artifactId -q -DforceStdout)
+        VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+        echo "ARTIFACT_ID=$ARTIFACT_ID" >> $GITHUB_OUTPUT
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        echo "TAG=v${VERSION}" >> $GITHUB_OUTPUT
+    
+    - name: Upload JAR artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.get_artifact.outputs.ARTIFACT_ID }}-Build-${{ github.run_number }}
+        path: target/*.jar
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.get_artifact.outputs.TAG }}
+        name: "${{ steps.get_artifact.outputs.ARTIFACT_ID }} ${{ steps.get_artifact.outputs.VERSION }}"
+        body: |
+          ### Installation:
+          1. Download `${{ steps.get_artifact.outputs.ARTIFACT_ID }}-${{ steps.get_artifact.outputs.VERSION }}.jar`
+          2. Place into `plugins` folder of your Minecraft server
+          3. Restart server or use `/reload`
+          
+          ### Build info:
+          - **Build #:** ${{ github.run_number }}
+          - **Commit:** ${{ github.sha }}
+          - **Branch:** ${{ github.ref_name }}
+        files: |
+          target/*.jar
+        draft: false
+        prerelease: false
+        fail_on_unmatched_files: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
