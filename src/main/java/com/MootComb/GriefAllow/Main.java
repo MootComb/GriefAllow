@@ -1,4 +1,4 @@
-package com.MootComb.GriefAllow;
+package com.mootcomb.griefallow;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -27,6 +27,7 @@ import org.bukkit.util.Vector;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 
@@ -34,16 +35,27 @@ public class Main extends JavaPlugin implements Listener {
 
     // ==================== CONSTANTS ====================
     private static final class Constants {
-        // TNT parameters
-        static final int TNT_FUSE_TICKS = 80;
+        // Primitive fuse: always 80 ticks (4 seconds), like an item
+        // ignited by flint and steel or redstone.
+        static final int TNT_FUSE_PRIMITIVE = 80;
+
+        // Smart fuse: vanilla chain reaction formula.
+        // fuse = random(0 .. baseFuse / 4) + baseFuse / 8
+        // with baseFuse = 80 => random(0..20) + 10 => 10..30 ticks.
+        static final int TNT_FUSE_BASE = 80;
+        static final int TNT_FUSE_SMART_DIVISOR_RANDOM = 4;
+        static final int TNT_FUSE_SMART_DIVISOR_OFFSET = 8;
+
         static final float TNT_YIELD = 4.0F;
-        static final float EXPLOSION_YIELD = 1.0F;
         static final double BLOCK_CENTER_OFFSET = 0.5;
+
+        // Fallback explosion yield when the source reports 0.
+        static final float EXPLOSION_YIELD = 1.0F;
+        static final double DEFAULT_EXPLOSION_YIELD_MULTIPLIER = 1.0;
 
         // Default values
         static final boolean DEFAULT_DEBUG = false;
         static final boolean DEFAULT_ENABLE_TNT = false;
-        static final boolean DEFAULT_TNT_CHAIN_REACTION = false;
         static final boolean DEFAULT_ENABLE_PISTONS = false;
         static final boolean DEFAULT_ENABLE_WITHER = false;
         static final boolean DEFAULT_ENABLE_SAND = false;
@@ -77,10 +89,64 @@ public class Main extends JavaPlugin implements Listener {
         }
     }
 
+    /**
+     * What to do with TNT blocks that are caught in an explosion's
+     * block list.
+     *
+     * ACTIVATE - ignite the TNT block so it becomes a primed TNT
+     *            entity, exactly like vanilla chain reactions.
+     * DESTROY  - break the block naturally (drops an item).
+     * NOTHING  - leave the TNT block untouched.
+     */
+    public enum TntAction {
+        ACTIVATE,
+        DESTROY,
+        NOTHING;
+
+        public static TntAction fromString(String value) {
+            if (value == null) {
+                return DESTROY;
+            }
+
+            try {
+                return TntAction.valueOf(value.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                return DESTROY;
+            }
+        }
+    }
+
+    /**
+     * How the fuse of a newly activated TNT is computed.
+     *
+     * PRIMITIVE - always 80 ticks (4 seconds), like an item ignited
+     *             by flint and steel or redstone.
+     * SMART     - vanilla chain reaction formula:
+     *             random(0 .. 80/4) + 80/8 => 10..30 ticks.
+     */
+    public enum TntMode {
+        PRIMITIVE,
+        SMART;
+
+        public static TntMode fromString(String value) {
+            if (value == null) {
+                return SMART;
+            }
+
+            try {
+                return TntMode.valueOf(value.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                return SMART;
+            }
+        }
+    }
+
     // ==================== CONFIGURATION ====================
     private volatile boolean debug;
     private volatile boolean enableTnt;
-    private volatile boolean tntChainReaction;
+    private volatile TntAction tntAction = TntAction.DESTROY;
+    private volatile TntMode tntMode = TntMode.SMART;
+    private volatile double explosionYieldMultiplier = Constants.DEFAULT_EXPLOSION_YIELD_MULTIPLIER;
     private volatile boolean enablePistons;
     private volatile boolean enableWither;
     private volatile boolean enableSand;
@@ -100,9 +166,6 @@ public class Main extends JavaPlugin implements Listener {
      * Entity types whose explosions the plugin is allowed to process.
      * If an entity type is not listed here, the plugin does not touch
      * the explosion at all - vanilla behaviour is preserved.
-     *
-     * This is important for things like Wind Charges and Breeze,
-     * which in vanilla do NOT break blocks.
      */
     private final Set<String> explosionTypes = ConcurrentHashMap.newKeySet();
 
@@ -179,7 +242,18 @@ public class Main extends JavaPlugin implements Listener {
     private void loadConfigValues() {
         debug = getConfig().getBoolean("debug", Constants.DEFAULT_DEBUG);
         enableTnt = getConfig().getBoolean("enable-tnt", Constants.DEFAULT_ENABLE_TNT);
-        tntChainReaction = getConfig().getBoolean("tnt-chain-reaction", Constants.DEFAULT_TNT_CHAIN_REACTION);
+
+        tntAction = loadTntAction();
+        tntMode = loadTntMode();
+
+        explosionYieldMultiplier = getConfig().getDouble(
+                "explosion-yield-multiplier",
+                Constants.DEFAULT_EXPLOSION_YIELD_MULTIPLIER);
+        if (explosionYieldMultiplier < 0) {
+            getLogger().warning("explosion-yield-multiplier is negative, clamping to 0");
+            explosionYieldMultiplier = 0;
+        }
+
         enablePistons = getConfig().getBoolean("enable-pistons", Constants.DEFAULT_ENABLE_PISTONS);
         enableWither = getConfig().getBoolean("enable-wither", Constants.DEFAULT_ENABLE_WITHER);
         enableSand = getConfig().getBoolean("enable-sand", Constants.DEFAULT_ENABLE_SAND);
@@ -192,6 +266,46 @@ public class Main extends JavaPlugin implements Listener {
         loadWorldSettings();
         loadRegionSettings();
         loadExplosionTypes();
+    }
+
+    /**
+     * Loads the TNT action from the config.
+     *
+     * Priority:
+     *   1. "tnt-action" string option, if present and valid.
+     *   2. "tnt-chain-reaction" boolean (deprecated), if "tnt-action"
+     *      is not set. true -> ACTIVATE, false -> DESTROY.
+     *   3. Default DESTROY.
+     */
+    private TntAction loadTntAction() {
+        if (getConfig().isString("tnt-action")) {
+            String raw = getConfig().getString("tnt-action");
+            TntAction action = TntAction.fromString(raw);
+            if (action != null) {
+                return action;
+            }
+            getLogger().warning("Unknown tnt-action value: '" + raw + "'. Falling back to tnt-chain-reaction.");
+        }
+
+        if (getConfig().isBoolean("tnt-chain-reaction")) {
+            boolean chain = getConfig().getBoolean("tnt-chain-reaction");
+            return chain ? TntAction.ACTIVATE : TntAction.DESTROY;
+        }
+
+        return TntAction.DESTROY;
+    }
+
+    /**
+     * Loads the TNT mode from the config. Default is SMART.
+     */
+    private TntMode loadTntMode() {
+        String raw = getConfig().getString("tnt-mode", "SMART");
+        TntMode mode = TntMode.fromString(raw);
+        if (mode == null) {
+            getLogger().warning("Unknown tnt-mode value: '" + raw + "'. Falling back to SMART.");
+            return TntMode.SMART;
+        }
+        return mode;
     }
 
     private void loadWorldSettings() {
@@ -274,7 +388,9 @@ public class Main extends JavaPlugin implements Listener {
 
     private void logConfiguration() {
         getLogger().info("Config values: enableTnt=" + enableTnt +
-                ", tntChainReaction=" + tntChainReaction +
+                ", tntAction=" + tntAction +
+                ", tntMode=" + tntMode +
+                ", explosionYieldMultiplier=" + explosionYieldMultiplier +
                 ", enablePistons=" + enablePistons +
                 ", enableWither=" + enableWither +
                 ", enableSand=" + enableSand +
@@ -372,15 +488,30 @@ public class Main extends JavaPlugin implements Listener {
         );
     }
 
-    /**
-     * Returns true if the explosion source entity type is listed in
-     * the explosion-types config option.
-     */
     private boolean isExplosionTypeAllowed(Entity entity) {
         if (entity == null) {
             return false;
         }
         return explosionTypes.contains(entity.getType().name().toUpperCase());
+    }
+
+    /**
+     * Computes the fuse for a freshly activated TNT according to the
+     * configured tnt-mode.
+     *
+     * PRIMITIVE - always Constants.TNT_FUSE_PRIMITIVE (80 ticks).
+     * SMART     - vanilla chain reaction formula:
+     *             random(0 .. 80/4) + 80/8 => 10..30 ticks.
+     */
+    private int computeFuse() {
+        if (tntMode == TntMode.PRIMITIVE) {
+            return Constants.TNT_FUSE_PRIMITIVE;
+        }
+
+        int base = Constants.TNT_FUSE_BASE;
+        int maxRandom = (base / Constants.TNT_FUSE_SMART_DIVISOR_RANDOM) + 1;
+        int offset = base / Constants.TNT_FUSE_SMART_DIVISOR_OFFSET;
+        return ThreadLocalRandom.current().nextInt(0, maxRandom) + offset;
     }
 
     // ==================== TNT HANDLING ====================
@@ -394,9 +525,12 @@ public class Main extends JavaPlugin implements Listener {
             try {
                 TNTPrimed tnt = loc.getWorld().spawn(loc, TNTPrimed.class);
                 if (tnt != null) {
-                    tnt.setFuseTicks(Constants.TNT_FUSE_TICKS);
+                    int fuse = computeFuse();
+                    tnt.setFuseTicks(fuse);
                     tnt.setYield(Constants.TNT_YIELD);
                     tnt.setVelocity(new Vector(0, 0, 0));
+                    debugLog("Spawned primed TNT at " + getLocationString(loc) +
+                            " with fuse=" + fuse + " (mode=" + tntMode + ")");
                 }
             } catch (Exception e) {
                 getLogger().log(Level.WARNING, "Failed to spawn TNT at " + getLocationString(loc), e);
@@ -404,26 +538,33 @@ public class Main extends JavaPlugin implements Listener {
         });
     }
 
-    private void igniteTNT(Block block) {
+    private void applyTntAction(Block block) {
         if (block == null || block.getType() != Material.TNT) {
             return;
         }
 
-        Location loc = block.getLocation();
-        if (!shouldPluginAct(loc)) {
+        if (!shouldPluginAct(block.getLocation())) {
             return;
         }
 
-        if (tntChainReaction) {
-            Location centerLoc = getBlockCenter(block);
-            if (centerLoc != null) {
-                block.setType(Material.AIR);
-                spawnTNTPrimed(centerLoc);
-                debugLog("TNT forced vanilla ignition at " + getBlockCoords(block));
-            }
-        } else {
-            block.breakNaturally();
-            debugLog("TNT dropped as item at " + getBlockCoords(block));
+        switch (tntAction) {
+            case ACTIVATE:
+                Location centerLoc = getBlockCenter(block);
+                if (centerLoc != null) {
+                    block.setType(Material.AIR);
+                    spawnTNTPrimed(centerLoc);
+                    debugLog("TNT activated (chain reaction) at " + getBlockCoords(block));
+                }
+                break;
+
+            case DESTROY:
+                block.breakNaturally();
+                debugLog("TNT destroyed at " + getBlockCoords(block));
+                break;
+
+            case NOTHING:
+                debugLog("TNT left untouched at " + getBlockCoords(block));
+                break;
         }
     }
 
@@ -441,8 +582,8 @@ public class Main extends JavaPlugin implements Listener {
             return;
         }
 
-        igniteTNT(block);
-        debugLog("TNT ignited by " + source + " at " + getBlockCoords(block));
+        applyTntAction(block);
+        debugLog("TNT handled (" + tntAction + ") by " + source + " at " + getBlockCoords(block));
     }
 
     // ==================== EVENT HANDLERS ====================
@@ -480,7 +621,20 @@ public class Main extends JavaPlugin implements Listener {
         }
 
         event.setCancelled(false);
-        event.setYield(Constants.EXPLOSION_YIELD);
+
+        // Scale the vanilla yield of this explosion by the configured
+        // multiplier. Base yield depends on the source entity type
+        // (e.g. Creeper = 3, TNT = 4, Ghast fireball = 1, etc.).
+        float baseYield = event.getYield();
+        if (baseYield <= 0.0F) {
+            baseYield = Constants.EXPLOSION_YIELD;
+        }
+        float finalYield = (float) (baseYield * explosionYieldMultiplier);
+        event.setYield(finalYield);
+
+        debugLog("Explosion yield: base=" + baseYield +
+                ", multiplier=" + explosionYieldMultiplier +
+                ", final=" + finalYield);
 
         List<Block> blocks = event.blockList();
         if (blocks == null) {
@@ -489,17 +643,19 @@ public class Main extends JavaPlugin implements Listener {
 
         List<Block> blocksToProcess = new ArrayList<>(blocks);
         for (Block block : blocksToProcess) {
-            if (block != null && shouldPluginAct(block.getLocation())) {
-                if (block.getType() == Material.TNT) {
-                    igniteTNT(block);
-                } else {
-                    block.breakNaturally();
-                }
+            if (block == null || !shouldPluginAct(block.getLocation())) {
+                continue;
+            }
+
+            if (block.getType() == Material.TNT) {
+                applyTntAction(block);
+            } else {
+                block.breakNaturally();
             }
         }
 
         debugLog("Explosion processed: " + (source != null ? source.getType() : "unknown") +
-                " with " + (tntChainReaction ? "chain reaction!" : "items drop!"));
+                " (TNT action: " + tntAction + ", mode: " + tntMode + ")");
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
