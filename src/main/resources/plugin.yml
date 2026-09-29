@@ -1,5 +1,5 @@
 name: GriefAllow
 version: 3.2
-main: com.Mootcomb.GriefAllow.Main
+main: com.MootComb.GriefAllow.Main
 api-version: 1.13
 folia-supported: true
