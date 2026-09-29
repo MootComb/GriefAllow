@@ -1,4 +1,4 @@
-package com.mootcomb.griefallow;
+package com.MootComb.GriefAllow;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
