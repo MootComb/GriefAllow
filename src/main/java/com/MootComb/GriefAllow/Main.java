@@ -90,13 +90,11 @@ public class Main extends JavaPlugin implements Listener {
     }
 
     /**
-     * What to do with TNT blocks that are caught in an explosion's
-     * block list.
+     * What to do with TNT blocks that are ignited by an explosion.
      *
-     * ACTIVATE - ignite the TNT block so it becomes a primed TNT
-     *            entity, exactly like vanilla chain reactions.
-     * DESTROY  - break the block naturally (drops an item).
-     * NOTHING  - leave the TNT block untouched.
+     * ACTIVATE - let the TNT ignite normally (vanilla chain reaction).
+     * DESTROY  - cancel the ignition and break the block naturally.
+     * NOTHING  - cancel the ignition and leave the block untouched.
      */
     public enum TntAction {
         ACTIVATE,
@@ -119,8 +117,7 @@ public class Main extends JavaPlugin implements Listener {
     /**
      * How the fuse of a newly activated TNT is computed.
      *
-     * PRIMITIVE - always 80 ticks (4 seconds), like an item ignited
-     *             by flint and steel or redstone.
+     * PRIMITIVE - always 80 ticks (4 seconds).
      * SMART     - vanilla chain reaction formula:
      *             random(0 .. 80/4) + 80/8 => 10..30 ticks.
      */
@@ -268,15 +265,6 @@ public class Main extends JavaPlugin implements Listener {
         loadExplosionTypes();
     }
 
-    /**
-     * Loads the TNT action from the config.
-     *
-     * Priority:
-     *   1. "tnt-action" string option, if present and valid.
-     *   2. "tnt-chain-reaction" boolean (deprecated), if "tnt-action"
-     *      is not set. true -> ACTIVATE, false -> DESTROY.
-     *   3. Default DESTROY.
-     */
     private TntAction loadTntAction() {
         if (getConfig().isString("tnt-action")) {
             String raw = getConfig().getString("tnt-action");
@@ -295,9 +283,6 @@ public class Main extends JavaPlugin implements Listener {
         return TntAction.DESTROY;
     }
 
-    /**
-     * Loads the TNT mode from the config. Default is SMART.
-     */
     private TntMode loadTntMode() {
         String raw = getConfig().getString("tnt-mode", "SMART");
         TntMode mode = TntMode.fromString(raw);
@@ -498,10 +483,6 @@ public class Main extends JavaPlugin implements Listener {
     /**
      * Computes the fuse for a freshly activated TNT according to the
      * configured tnt-mode.
-     *
-     * PRIMITIVE - always Constants.TNT_FUSE_PRIMITIVE (80 ticks).
-     * SMART     - vanilla chain reaction formula:
-     *             random(0 .. 80/4) + 80/8 => 10..30 ticks.
      */
     private int computeFuse() {
         if (tntMode == TntMode.PRIMITIVE) {
@@ -527,7 +508,7 @@ public class Main extends JavaPlugin implements Listener {
                 if (tnt != null) {
                     int fuse = computeFuse();
                     tnt.setFuseTicks(fuse);
-                    tnt.setYield(Constants.TNT_YIELD);
+                    tnt.setYield((float) (Constants.TNT_YIELD * explosionYieldMultiplier));
                     tnt.setVelocity(new Vector(0, 0, 0));
                     debugLog("Spawned primed TNT at " + getLocationString(loc) +
                             " with fuse=" + fuse + " (mode=" + tntMode + ")");
@@ -536,36 +517,6 @@ public class Main extends JavaPlugin implements Listener {
                 getLogger().log(Level.WARNING, "Failed to spawn TNT at " + getLocationString(loc), e);
             }
         });
-    }
-
-    private void applyTntAction(Block block) {
-        if (block == null || block.getType() != Material.TNT) {
-            return;
-        }
-
-        if (!shouldPluginAct(block.getLocation())) {
-            return;
-        }
-
-        switch (tntAction) {
-            case ACTIVATE:
-                Location centerLoc = getBlockCenter(block);
-                if (centerLoc != null) {
-                    block.setType(Material.AIR);
-                    spawnTNTPrimed(centerLoc);
-                    debugLog("TNT activated (chain reaction) at " + getBlockCoords(block));
-                }
-                break;
-
-            case DESTROY:
-                block.breakNaturally();
-                debugLog("TNT destroyed at " + getBlockCoords(block));
-                break;
-
-            case NOTHING:
-                debugLog("TNT left untouched at " + getBlockCoords(block));
-                break;
-        }
     }
 
     private void handleTNTIgnition(Block block, String source) {
@@ -582,8 +533,7 @@ public class Main extends JavaPlugin implements Listener {
             return;
         }
 
-        applyTntAction(block);
-        debugLog("TNT handled (" + tntAction + ") by " + source + " at " + getBlockCoords(block));
+        debugLog("TNT ignition handled by " + source + " at " + getBlockCoords(block));
     }
 
     // ==================== EVENT HANDLERS ====================
@@ -594,7 +544,7 @@ public class Main extends JavaPlugin implements Listener {
     // and to other plugins such as WorldGuard.
     //
 
-    @EventHandler(priority = EventPriority.LOWEST)
+    @EventHandler(priority = EventPriority.HIGH)
     public void onExplode(EntityExplodeEvent event) {
         if (event == null) {
             return;
@@ -622,9 +572,12 @@ public class Main extends JavaPlugin implements Listener {
 
         event.setCancelled(false);
 
-        // Scale the vanilla yield of this explosion by the configured
-        // multiplier. Base yield depends on the source entity type
-        // (e.g. Creeper = 3, TNT = 4, Ghast fireball = 1, etc.).
+        // Apply yield multiplier directly to the source entity.
+        // event.setYield(...) is often ignored by Paper for TNT and
+        // Creeper explosions, so we set it on the entity itself.
+        applyYieldToSource(source);
+
+        // Also set it on the event as a fallback.
         float baseYield = event.getYield();
         if (baseYield <= 0.0F) {
             baseYield = Constants.EXPLOSION_YIELD;
@@ -636,28 +589,61 @@ public class Main extends JavaPlugin implements Listener {
                 ", multiplier=" + explosionYieldMultiplier +
                 ", final=" + finalYield);
 
+        // Break blocks in the block list. TNT blocks are handled
+        // separately by onTntIgnite, so we skip them here.
         List<Block> blocks = event.blockList();
-        if (blocks == null) {
-            return;
-        }
-
-        List<Block> blocksToProcess = new ArrayList<>(blocks);
-        for (Block block : blocksToProcess) {
-            if (block == null || !shouldPluginAct(block.getLocation())) {
-                continue;
-            }
-
-            if (block.getType() == Material.TNT) {
-                applyTntAction(block);
-            } else {
+        if (blocks != null) {
+            List<Block> snapshot = new ArrayList<>(blocks);
+            for (Block block : snapshot) {
+                if (block == null || !shouldPluginAct(block.getLocation())) {
+                    continue;
+                }
+                if (block.getType() == Material.TNT) {
+                    // Leave it - onTntIgnite will decide its fate.
+                    continue;
+                }
                 block.breakNaturally();
             }
         }
 
         debugLog("Explosion processed: " + (source != null ? source.getType() : "unknown") +
-                " (TNT action: " + tntAction + ", mode: " + tntMode + ")");
+                " (tnt-action: " + tntAction + ", tnt-mode: " + tntMode + ")");
     }
 
+    /**
+     * Applies the yield multiplier directly to the explosion source
+     * entity. Different entity types expose yield differently.
+     */
+    private void applyYieldToSource(Entity source) {
+        if (source == null) {
+            return;
+        }
+
+        if (source instanceof TNTPrimed) {
+            float newYield = (float) (Constants.TNT_YIELD * explosionYieldMultiplier);
+            ((TNTPrimed) source).setYield(newYield);
+            debugLog("Set TNTPrimed yield to " + newYield);
+        } else if (source instanceof Creeper) {
+            int baseRadius = 3;
+            int newRadius = (int) Math.round(baseRadius * explosionYieldMultiplier);
+            if (newRadius < 0) {
+                newRadius = 0;
+            }
+            ((Creeper) source).setExplosionRadius(newRadius);
+            debugLog("Set Creeper explosion radius to " + newRadius);
+        } else if (source instanceof Fireball) {
+            float newYield = (float) (1.0F * explosionYieldMultiplier);
+            ((Fireball) source).setYield(newYield);
+            debugLog("Set Fireball yield to " + newYield);
+        }
+    }
+
+    /**
+     * Handles TNT block ignition. This is where tnt-action is applied.
+     *
+     * The event fires for every TNT block that is about to be ignited
+     * (by flint & steel, fire, redstone, another explosion, etc.).
+     */
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onTntIgnite(BlockIgniteEvent event) {
         if (event == null) {
@@ -667,20 +653,37 @@ public class Main extends JavaPlugin implements Listener {
         debugLog("onTntIgnite called - Cause: " + event.getCause());
 
         Block block = event.getBlock();
-        if (block == null || !shouldPluginAct(block.getLocation())) {
-            debugLog("Block ignition outside plugin scope, ignoring");
+        if (block == null || block.getType() != Material.TNT) {
             return;
         }
 
-        if (enableTnt && block.getType() == Material.TNT) {
-            event.setCancelled(false);
-            debugLog("TNT ignition allowed");
+        if (!enableTnt) {
+            return;
+        }
 
-            if (event.getCause() == BlockIgniteEvent.IgniteCause.FLINT_AND_STEEL) {
-                debugLog("TNT ignited with Flint & Steel!");
-            } else if (event.getCause() == BlockIgniteEvent.IgniteCause.FIREBALL) {
-                debugLog("TNT ignited with Fireball!");
-            }
+        if (!shouldPluginAct(block.getLocation())) {
+            debugLog("TNT ignition outside plugin scope, ignoring");
+            return;
+        }
+
+        switch (tntAction) {
+            case ACTIVATE:
+                // Let vanilla ignite the TNT. tnt-mode is applied via
+                // spawnTNTPrimed only for TNT spawned by this plugin.
+                event.setCancelled(false);
+                debugLog("TNT ignition allowed (ACTIVATE) at " + getBlockCoords(block));
+                break;
+
+            case DESTROY:
+                event.setCancelled(true);
+                block.breakNaturally();
+                debugLog("TNT destroyed (DESTROY) at " + getBlockCoords(block));
+                break;
+
+            case NOTHING:
+                event.setCancelled(true);
+                debugLog("TNT left untouched (NOTHING) at " + getBlockCoords(block));
+                break;
         }
     }
 
