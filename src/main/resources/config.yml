@@ -17,13 +17,12 @@ debug: false
 # Allow TNT to explode and destroy blocks
 enable-tnt: true
 
-# What to do with TNT blocks caught in an explosion's block list:
-#
-#   ACTIVATE - ignite the TNT so it becomes a primed TNT entity,
-#              exactly like vanilla chain reactions.
-#   DESTROY  - break the block naturally, dropping an item.
-#   NOTHING  - leave the TNT block untouched.
-tnt-action: DESTROY
+# Chain reaction behavior:
+#   true  - TNT caught in an explosion is ignited, so it becomes a
+#           primed TNT entity (vanilla-like chain reaction).
+#   false - TNT caught in an explosion is broken naturally, dropping
+#           an item.
+tnt-chain-reaction: true
 
 # How the fuse of a freshly activated TNT is computed:
 #
@@ -32,19 +31,6 @@ tnt-action: DESTROY
 #   smart     - vanilla chain reaction formula:
 #               random(0 .. 80/4) + 80/8 => 10..30 ticks.
 tnt-mode: smart
-
-# Multiplier applied to the vanilla explosion yield of every processed
-# explosion. Final yield = vanillaYield * multiplier.
-#
-#   1.0        - standard, vanilla strength (default)
-#   0.5        - half strength
-#   0.13523526 - very weak explosion
-#   1000       - extremely powerful
-#
-# The base yield depends on the source entity type, so different
-# explosion sources keep their relative strength (Creeper vs TNT vs
-# Ghast fireball, etc.) but scale consistently with this multiplier.
-explosion-yield-multiplier: 1.0
 
 # Piston Settings
 # Allow pistons to push and pull blocks
