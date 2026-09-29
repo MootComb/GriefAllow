@@ -1,5 +1,12 @@
 # GriefAllow Configuration
 # Plugin that allows griefing mechanics in specified worlds and regions
+#
+# IMPORTANT:
+# Outside of the configured scope the plugin does NOTHING.
+# It does not protect, does not cancel, does not override.
+# It only ALLOWS griefing inside whitelisted areas
+# (or outside blacklisted ones). Everything else is left to
+# vanilla behaviour and to other plugins.
 
 # Debug mode - enables detailed logging for troubleshooting
 debug: false
@@ -44,13 +51,43 @@ enable-fluid-flow: true
 # Allow players to pull minecarts with a fishing rod
 enable-fishing-minecart: true
 
+# ==================== EXPLOSION TYPES ====================
+# Only explosions whose source entity type is listed here will be
+# handled by the plugin. Everything else is left completely untouched,
+# so it keeps its vanilla behaviour.
+#
+# This is important for Wind Charge and Breeze, which in vanilla do
+# NOT break blocks. Leave them commented out unless you explicitly
+# want them to grief terrain.
+#
+# Uncomment a line to let the plugin process that explosion type.
+# Comment out a line to leave that explosion type to vanilla.
+
+explosion-types:
+  - TNT
+  - TNT_MINECART
+  - ENDER_CRYSTAL
+  
+  - CREEPER
+  - WITHER
+  - WITHER_SKULL
+
+  # - GHAST
+  # - FIREBALL
+  # - SMALL_FIREBALL
+  # - DRAGON_FIREBALL
+  # - WIND_CHARGE
+  # - BREEZE_WIND_CHARGE
+  # - BREEZE
+
+
 # ==================== WORLD FILTERING ====================
 
 # World filtering type:
 # whitelist - plugin will ONLY work in the worlds listed below
-# blacklist - plugin will NOT work in the worlds listed below
-# disable - plugin will work in ALL worlds regardless (default)
-worlds-type: disable
+# blacklist - plugin will NOT work in the worlds listed below (default)
+# disable - plugin will work in ALL worlds regardless
+worlds-type: blacklist
 
 # List of worlds for whitelist/blacklist filtering
 worlds:
