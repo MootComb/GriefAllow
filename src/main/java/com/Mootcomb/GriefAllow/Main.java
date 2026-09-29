@@ -96,6 +96,16 @@ public class Main extends JavaPlugin implements Listener {
     private volatile ListMode regionsMode = ListMode.DISABLE;
     private final Map<String, Region> regions = new ConcurrentHashMap<>();
 
+    /**
+     * Entity types whose explosions the plugin is allowed to process.
+     * If an entity type is not listed here, the plugin does not touch
+     * the explosion at all - vanilla behaviour is preserved.
+     *
+     * This is important for things like Wind Charges and Breeze,
+     * which in vanilla do NOT break blocks.
+     */
+    private final Set<String> explosionTypes = ConcurrentHashMap.newKeySet();
+
     private boolean isFolia;
 
     // ==================== PLUGIN LIFECYCLE ====================
@@ -181,6 +191,7 @@ public class Main extends JavaPlugin implements Listener {
 
         loadWorldSettings();
         loadRegionSettings();
+        loadExplosionTypes();
     }
 
     private void loadWorldSettings() {
@@ -232,13 +243,32 @@ public class Main extends JavaPlugin implements Listener {
         }
     }
 
+    private void loadExplosionTypes() {
+        explosionTypes.clear();
+        List<String> list = getConfig().getStringList("explosion-types");
+        if (list != null) {
+            for (String s : list) {
+                if (s != null && !s.trim().isEmpty()) {
+                    explosionTypes.add(s.trim().toUpperCase());
+                }
+            }
+        }
+        if (debug) {
+            getLogger().info("Loaded explosion types: " + explosionTypes);
+        }
+    }
+
     private void validateConfig() {
         if (worldsMode == ListMode.WHITELIST && worlds.isEmpty()) {
-            getLogger().warning("World whitelist mode enabled but no worlds specified! All worlds will be blocked.");
+            getLogger().warning("World whitelist mode enabled but no worlds specified! Plugin will not act anywhere.");
         }
 
         if (regionsMode == ListMode.WHITELIST && regions.isEmpty()) {
-            getLogger().warning("Region whitelist mode enabled but no regions specified! All regions will be blocked.");
+            getLogger().warning("Region whitelist mode enabled but no regions specified! Plugin will not act anywhere.");
+        }
+
+        if (explosionTypes.isEmpty()) {
+            getLogger().warning("No explosion-types specified! No explosions will be processed.");
         }
     }
 
@@ -255,14 +285,28 @@ public class Main extends JavaPlugin implements Listener {
                 ", enableFishingMinecart=" + enableFishingMinecart);
         getLogger().info("Worlds mode: " + worldsMode + ", Worlds: " + worlds);
         getLogger().info("Regions mode: " + regionsMode + ", Regions count: " + regions.size());
+        getLogger().info("Explosion types: " + explosionTypes);
     }
 
     // ==================== LOCATION CHECKS ====================
-    private boolean isAllowedWorld(Location location) {
+
+    /**
+     * Returns true if the plugin SHOULD act at the given location,
+     * according to the worlds/regions configuration.
+     *
+     * IMPORTANT: If this returns false, the plugin must NOT touch the
+     * event at all. It must not cancel it, and it must not force-allow
+     * it either. This leaves room for other plugins (WorldGuard, etc.)
+     * and vanilla behaviour to do their job.
+     */
+    private boolean shouldPluginAct(Location location) {
         if (location == null || location.getWorld() == null) {
             return false;
         }
+        return isWorldInScope(location) && isRegionInScope(location);
+    }
 
+    private boolean isWorldInScope(Location location) {
         if (worldsMode == ListMode.DISABLE) {
             return true;
         }
@@ -276,11 +320,7 @@ public class Main extends JavaPlugin implements Listener {
         return worldsMode == ListMode.WHITELIST ? inWorld : !inWorld;
     }
 
-    private boolean isAllowedRegion(Location location) {
-        if (location == null || location.getWorld() == null) {
-            return false;
-        }
-
+    private boolean isRegionInScope(Location location) {
         if (regionsMode == ListMode.DISABLE || regions.isEmpty()) {
             return true;
         }
@@ -294,13 +334,6 @@ public class Main extends JavaPlugin implements Listener {
         }
 
         return regionsMode == ListMode.WHITELIST ? inAnyRegion : !inAnyRegion;
-    }
-
-    private boolean isLocationAllowed(Location location) {
-        if (location == null || location.getWorld() == null) {
-            return false;
-        }
-        return isAllowedWorld(location) && isAllowedRegion(location);
     }
 
     // ==================== UTILITY METHODS ====================
@@ -339,6 +372,17 @@ public class Main extends JavaPlugin implements Listener {
         );
     }
 
+    /**
+     * Returns true if the explosion source entity type is listed in
+     * the explosion-types config option.
+     */
+    private boolean isExplosionTypeAllowed(Entity entity) {
+        if (entity == null) {
+            return false;
+        }
+        return explosionTypes.contains(entity.getType().name().toUpperCase());
+    }
+
     // ==================== TNT HANDLING ====================
     private void spawnTNTPrimed(Location loc) {
         if (loc == null || loc.getWorld() == null) {
@@ -366,7 +410,7 @@ public class Main extends JavaPlugin implements Listener {
         }
 
         Location loc = block.getLocation();
-        if (!isLocationAllowed(loc)) {
+        if (!shouldPluginAct(loc)) {
             return;
         }
 
@@ -392,8 +436,8 @@ public class Main extends JavaPlugin implements Listener {
             return;
         }
 
-        if (!isLocationAllowed(block.getLocation())) {
-            debugLog("TNT ignition blocked by location check: " + getBlockCoords(block));
+        if (!shouldPluginAct(block.getLocation())) {
+            debugLog("TNT ignition outside plugin scope: " + getBlockCoords(block));
             return;
         }
 
@@ -402,6 +446,13 @@ public class Main extends JavaPlugin implements Listener {
     }
 
     // ==================== EVENT HANDLERS ====================
+    //
+    // IMPORTANT: When shouldPluginAct(...) returns false, the plugin
+    // must NOT touch the event at all. It does not cancel it, it does
+    // not force-allow it. This leaves the event to vanilla behaviour
+    // and to other plugins such as WorldGuard.
+    //
+
     @EventHandler(priority = EventPriority.LOWEST)
     public void onExplode(EntityExplodeEvent event) {
         if (event == null) {
@@ -410,14 +461,21 @@ public class Main extends JavaPlugin implements Listener {
 
         debugLog("onExplode called");
 
-        if (!isLocationAllowed(event.getLocation())) {
-            debugLog("Explosion location not allowed, cancelling event");
-            event.setCancelled(true);
+        Location loc = event.getLocation();
+        if (!shouldPluginAct(loc)) {
+            debugLog("Explosion outside plugin scope, ignoring");
+            return;
+        }
+
+        Entity source = event.getEntity();
+        if (!isExplosionTypeAllowed(source)) {
+            debugLog("Explosion type not in config, ignoring: " +
+                    (source != null ? source.getType() : "null"));
             return;
         }
 
         if (!enableTnt) {
-            debugLog("TNT explosions disabled, skipping");
+            debugLog("Explosions disabled, ignoring");
             return;
         }
 
@@ -431,7 +489,7 @@ public class Main extends JavaPlugin implements Listener {
 
         List<Block> blocksToProcess = new ArrayList<>(blocks);
         for (Block block : blocksToProcess) {
-            if (block != null && isLocationAllowed(block.getLocation())) {
+            if (block != null && shouldPluginAct(block.getLocation())) {
                 if (block.getType() == Material.TNT) {
                     igniteTNT(block);
                 } else {
@@ -440,7 +498,8 @@ public class Main extends JavaPlugin implements Listener {
             }
         }
 
-        debugLog("TNT Explosion with " + (tntChainReaction ? "chain reaction!" : "items drop!"));
+        debugLog("Explosion processed: " + (source != null ? source.getType() : "unknown") +
+                " with " + (tntChainReaction ? "chain reaction!" : "items drop!"));
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -452,8 +511,8 @@ public class Main extends JavaPlugin implements Listener {
         debugLog("onTntIgnite called - Cause: " + event.getCause());
 
         Block block = event.getBlock();
-        if (block == null || !isLocationAllowed(block.getLocation())) {
-            debugLog("Block ignition location not allowed, skipping");
+        if (block == null || !shouldPluginAct(block.getLocation())) {
+            debugLog("Block ignition outside plugin scope, ignoring");
             return;
         }
 
@@ -478,14 +537,12 @@ public class Main extends JavaPlugin implements Listener {
         debugLog("onFlintClick called - Action: " + event.getAction());
 
         Block clickedBlock = event.getClickedBlock();
-        if (clickedBlock != null && !isLocationAllowed(clickedBlock.getLocation())) {
-            debugLog("Clicked block location not allowed, skipping");
+        if (clickedBlock == null || !shouldPluginAct(clickedBlock.getLocation())) {
+            debugLog("Clicked block outside plugin scope, ignoring");
             return;
         }
 
-        if (enableTnt && clickedBlock != null &&
-                event.getAction().name().contains("RIGHT_CLICK_BLOCK")) {
-
+        if (enableTnt && event.getAction().name().contains("RIGHT_CLICK_BLOCK")) {
             if (event.getItem() != null && event.getItem().getType() == Material.FLINT_AND_STEEL) {
                 if (clickedBlock.getType() == Material.TNT) {
                     event.setCancelled(false);
@@ -504,30 +561,30 @@ public class Main extends JavaPlugin implements Listener {
         debugLog("onFireArrowHit called");
 
         if (!enableTnt) {
-            debugLog("TNT disabled, skipping");
+            debugLog("TNT disabled, ignoring");
             return;
         }
 
         Entity entity = event.getEntity();
         if (!(entity instanceof Arrow)) {
-            debugLog("Not an arrow, skipping");
+            debugLog("Not an arrow, ignoring");
             return;
         }
 
         Arrow arrow = (Arrow) entity;
         if (arrow.getFireTicks() <= 0) {
-            debugLog("Arrow not on fire, skipping");
+            debugLog("Arrow not on fire, ignoring");
             return;
         }
 
         Block hitBlock = event.getHitBlock();
         if (hitBlock == null) {
-            debugLog("No block hit, skipping");
+            debugLog("No block hit, ignoring");
             return;
         }
 
-        if (!isLocationAllowed(hitBlock.getLocation())) {
-            debugLog("Hit block location not allowed, skipping");
+        if (!shouldPluginAct(hitBlock.getLocation())) {
+            debugLog("Hit block outside plugin scope, ignoring");
             return;
         }
 
@@ -546,8 +603,8 @@ public class Main extends JavaPlugin implements Listener {
         debugLog("onPistonExtend called");
 
         Block block = event.getBlock();
-        if (block == null || !isLocationAllowed(block.getLocation())) {
-            debugLog("Piston location not allowed, skipping");
+        if (block == null || !shouldPluginAct(block.getLocation())) {
+            debugLog("Piston outside plugin scope, ignoring");
             return;
         }
 
@@ -566,8 +623,8 @@ public class Main extends JavaPlugin implements Listener {
         debugLog("onPistonRetract called");
 
         Block block = event.getBlock();
-        if (block == null || !isLocationAllowed(block.getLocation())) {
-            debugLog("Piston location not allowed, skipping");
+        if (block == null || !shouldPluginAct(block.getLocation())) {
+            debugLog("Piston outside plugin scope, ignoring");
             return;
         }
 
@@ -586,8 +643,8 @@ public class Main extends JavaPlugin implements Listener {
         debugLog("onWitherBlockBreak called - Entity: " + event.getEntityType());
 
         Block block = event.getBlock();
-        if (block == null || !isLocationAllowed(block.getLocation())) {
-            debugLog("Wither block break location not allowed, skipping");
+        if (block == null || !shouldPluginAct(block.getLocation())) {
+            debugLog("Wither block break outside plugin scope, ignoring");
             return;
         }
 
@@ -608,8 +665,8 @@ public class Main extends JavaPlugin implements Listener {
         debugLog("onWitherDamage called");
 
         Entity entity = event.getEntity();
-        if (entity == null || !isLocationAllowed(entity.getLocation())) {
-            debugLog("Wither damage location not allowed, skipping");
+        if (entity == null || !shouldPluginAct(entity.getLocation())) {
+            debugLog("Wither damage outside plugin scope, ignoring");
             return;
         }
 
@@ -628,8 +685,8 @@ public class Main extends JavaPlugin implements Listener {
         debugLog("onGravityFall called - Block type: " + event.getBlock().getType());
 
         Block block = event.getBlock();
-        if (block == null || !isLocationAllowed(block.getLocation())) {
-            debugLog("Gravity block location not allowed, skipping");
+        if (block == null || !shouldPluginAct(block.getLocation())) {
+            debugLog("Gravity block outside plugin scope, ignoring");
             return;
         }
 
@@ -660,8 +717,8 @@ public class Main extends JavaPlugin implements Listener {
             checkLocation = event.getSource().getLocation();
         }
 
-        if (checkLocation != null && !isLocationAllowed(checkLocation)) {
-            debugLog("Inventory location not allowed, skipping");
+        if (checkLocation == null || !shouldPluginAct(checkLocation)) {
+            debugLog("Inventory move outside plugin scope, ignoring");
             return;
         }
 
@@ -681,8 +738,8 @@ public class Main extends JavaPlugin implements Listener {
         debugLog("onEggSpawn (PlayerInteractEvent) called - Action: " + event.getAction());
 
         Block clickedBlock = event.getClickedBlock();
-        if (clickedBlock != null && !isLocationAllowed(clickedBlock.getLocation())) {
-            debugLog("Egg spawn location not allowed, skipping");
+        if (clickedBlock == null || !shouldPluginAct(clickedBlock.getLocation())) {
+            debugLog("Egg spawn outside plugin scope, ignoring");
             return;
         }
 
@@ -707,8 +764,8 @@ public class Main extends JavaPlugin implements Listener {
         debugLog("onVehicleDestroy called - Vehicle: " + event.getVehicle().getType());
 
         Vehicle vehicle = event.getVehicle();
-        if (vehicle == null || !isLocationAllowed(vehicle.getLocation())) {
-            debugLog("Vehicle location not allowed, skipping");
+        if (vehicle == null || !shouldPluginAct(vehicle.getLocation())) {
+            debugLog("Vehicle outside plugin scope, ignoring");
             return;
         }
 
@@ -732,10 +789,12 @@ public class Main extends JavaPlugin implements Listener {
         Block block = event.getBlock();
         Block toBlock = event.getToBlock();
 
-        if (block == null || toBlock == null ||
-                !isLocationAllowed(block.getLocation()) ||
-                !isLocationAllowed(toBlock.getLocation())) {
-            debugLog("Fluid flow location not allowed, skipping");
+        if (block == null || toBlock == null) {
+            return;
+        }
+
+        if (!shouldPluginAct(block.getLocation()) || !shouldPluginAct(toBlock.getLocation())) {
+            debugLog("Fluid flow outside plugin scope, ignoring");
             return;
         }
 
@@ -754,14 +813,23 @@ public class Main extends JavaPlugin implements Listener {
 
         debugLog("onFishMinecart called - State: " + event.getState());
 
-        if (enableFishingMinecart && event.getState() == PlayerFishEvent.State.CAUGHT_ENTITY) {
-            Entity caught = event.getCaught();
-            if (caught instanceof Minecart && isLocationAllowed(caught.getLocation())) {
-                event.setCancelled(false);
-                debugLog("Minecart caught by fishing rod - allowing pull");
-                debugLog("Minecart pulled by fishing rod!");
-            }
+        if (!enableFishingMinecart || event.getState() != PlayerFishEvent.State.CAUGHT_ENTITY) {
+            return;
         }
+
+        Entity caught = event.getCaught();
+        if (!(caught instanceof Minecart)) {
+            return;
+        }
+
+        if (!shouldPluginAct(caught.getLocation())) {
+            debugLog("Fishing minecart outside plugin scope, ignoring");
+            return;
+        }
+
+        event.setCancelled(false);
+        debugLog("Minecart caught by fishing rod - allowing pull");
+        debugLog("Minecart pulled by fishing rod!");
     }
 
     // ==================== REGION CLASS ====================
