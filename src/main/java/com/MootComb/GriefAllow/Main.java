@@ -27,6 +27,7 @@ import org.bukkit.util.Vector;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 
@@ -34,8 +35,16 @@ public class Main extends JavaPlugin implements Listener {
 
     // ==================== CONSTANTS ====================
     private static final class Constants {
-        // TNT parameters
-        static final int TNT_FUSE_TICKS = 80;
+        // Primitive fuse: always 80 ticks (4 seconds).
+        static final int TNT_FUSE_PRIMITIVE = 80;
+
+        // Smart fuse: vanilla chain reaction formula.
+        // fuse = random(0 .. baseFuse / 4) + baseFuse / 8
+        // with baseFuse = 80 => random(0..20) + 10 => 10..30 ticks.
+        static final int TNT_FUSE_BASE = 80;
+        static final int TNT_FUSE_SMART_DIVISOR_RANDOM = 4;
+        static final int TNT_FUSE_SMART_DIVISOR_OFFSET = 8;
+
         static final float TNT_YIELD = 4.0F;
         static final float EXPLOSION_YIELD = 1.0F;
         static final double BLOCK_CENTER_OFFSET = 0.5;
@@ -77,10 +86,35 @@ public class Main extends JavaPlugin implements Listener {
         }
     }
 
+    /**
+     * How the fuse of a newly activated TNT is computed.
+     *
+     * PRIMITIVE - always 80 ticks (4 seconds).
+     * SMART     - vanilla chain reaction formula:
+     *             random(0 .. 80/4) + 80/8 => 10..30 ticks.
+     */
+    public enum TntMode {
+        PRIMITIVE,
+        SMART;
+
+        public static TntMode fromString(String value) {
+            if (value == null) {
+                return SMART;
+            }
+
+            try {
+                return TntMode.valueOf(value.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                return SMART;
+            }
+        }
+    }
+
     // ==================== CONFIGURATION ====================
     private volatile boolean debug;
     private volatile boolean enableTnt;
     private volatile boolean tntChainReaction;
+    private volatile TntMode tntMode = TntMode.SMART;
     private volatile boolean enablePistons;
     private volatile boolean enableWither;
     private volatile boolean enableSand;
@@ -180,6 +214,7 @@ public class Main extends JavaPlugin implements Listener {
         debug = getConfig().getBoolean("debug", Constants.DEFAULT_DEBUG);
         enableTnt = getConfig().getBoolean("enable-tnt", Constants.DEFAULT_ENABLE_TNT);
         tntChainReaction = getConfig().getBoolean("tnt-chain-reaction", Constants.DEFAULT_TNT_CHAIN_REACTION);
+        tntMode = loadTntMode();
         enablePistons = getConfig().getBoolean("enable-pistons", Constants.DEFAULT_ENABLE_PISTONS);
         enableWither = getConfig().getBoolean("enable-wither", Constants.DEFAULT_ENABLE_WITHER);
         enableSand = getConfig().getBoolean("enable-sand", Constants.DEFAULT_ENABLE_SAND);
@@ -192,6 +227,16 @@ public class Main extends JavaPlugin implements Listener {
         loadWorldSettings();
         loadRegionSettings();
         loadExplosionTypes();
+    }
+
+    private TntMode loadTntMode() {
+        String raw = getConfig().getString("tnt-mode", "SMART");
+        TntMode mode = TntMode.fromString(raw);
+        if (mode == null) {
+            getLogger().warning("Unknown tnt-mode value: '" + raw + "'. Falling back to SMART.");
+            return TntMode.SMART;
+        }
+        return mode;
     }
 
     private void loadWorldSettings() {
@@ -275,6 +320,7 @@ public class Main extends JavaPlugin implements Listener {
     private void logConfiguration() {
         getLogger().info("Config values: enableTnt=" + enableTnt +
                 ", tntChainReaction=" + tntChainReaction +
+                ", tntMode=" + tntMode +
                 ", enablePistons=" + enablePistons +
                 ", enableWither=" + enableWither +
                 ", enableSand=" + enableSand +
@@ -383,6 +429,21 @@ public class Main extends JavaPlugin implements Listener {
         return explosionTypes.contains(entity.getType().name().toUpperCase());
     }
 
+    /**
+     * Computes the fuse for a freshly activated TNT according to the
+     * configured tnt-mode.
+     */
+    private int computeFuse() {
+        if (tntMode == TntMode.PRIMITIVE) {
+            return Constants.TNT_FUSE_PRIMITIVE;
+        }
+
+        int base = Constants.TNT_FUSE_BASE;
+        int maxRandom = (base / Constants.TNT_FUSE_SMART_DIVISOR_RANDOM) + 1;
+        int offset = base / Constants.TNT_FUSE_SMART_DIVISOR_OFFSET;
+        return ThreadLocalRandom.current().nextInt(0, maxRandom) + offset;
+    }
+
     // ==================== TNT HANDLING ====================
     private void spawnTNTPrimed(Location loc) {
         if (loc == null || loc.getWorld() == null) {
@@ -394,9 +455,12 @@ public class Main extends JavaPlugin implements Listener {
             try {
                 TNTPrimed tnt = loc.getWorld().spawn(loc, TNTPrimed.class);
                 if (tnt != null) {
-                    tnt.setFuseTicks(Constants.TNT_FUSE_TICKS);
+                    int fuse = computeFuse();
+                    tnt.setFuseTicks(fuse);
                     tnt.setYield(Constants.TNT_YIELD);
                     tnt.setVelocity(new Vector(0, 0, 0));
+                    debugLog("Spawned primed TNT at " + getLocationString(loc) +
+                            " with fuse=" + fuse + " (mode=" + tntMode + ")");
                 }
             } catch (Exception e) {
                 getLogger().log(Level.WARNING, "Failed to spawn TNT at " + getLocationString(loc), e);
